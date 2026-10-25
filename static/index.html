@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Alpha Cockpit — Cẩm nang chứng khoán thực chiến</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">PERSONAL INVESTMENT OPERATING SYSTEM</div>
+      <h1>Alpha Cockpit</h1>
+    </div>
+    <div class="status"><span class="dot"></span><span id="health">local engine</span><b>Broker: read-only</b></div>
+  </header>
+
+  <nav class="tabs" aria-label="Primary">
+    <button class="tab active" data-tab="cockpit">Cockpit</button>
+    <button class="tab" data-tab="handbook">38 mục thực chiến</button>
+    <button class="tab" data-tab="scorelab">Decision Index</button>
+    <button class="tab" data-tab="architecture">Agent architecture</button>
+    <button class="tab" data-tab="audit">Audit</button>
+  </nav>
+
+  <main>
+    <section id="cockpit" class="panel active">
+      <div class="hero-grid">
+        <article class="card hero-card">
+          <div class="card-head"><span>Equity budget</span><span class="pill">POLICY</span></div>
+          <div class="big">400M VND</div>
+          <p>Hurdle tiền gửi: <strong id="hurdle">8.8%</strong>/năm. Margin 0. Derivatives 0.</p>
+        </article>
+        <article class="card">
+          <div class="card-head"><span>Decision framework</span><span class="pill neutral">EXPLAINABLE</span></div>
+          <div class="metric-row"><b>Score</b><span>0–100</span></div>
+          <div class="metric-row"><b>Confidence</b><span>0–100%</span></div>
+          <div class="metric-row"><b>Action</b><span>review band</span></div>
+          <div class="metric-row"><b>Sizing</b><span>target-gap limited</span></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><span>Safety gates</span><span class="pill safe">ON</span></div>
+          <p>No broker write API. No auto-order. Agent outputs are advisory/review artifacts only.</p>
+          <p class="muted">BUY/SELL remains a manual user action outside this app.</p>
+        </article>
+      </div>
+
+      <div class="section-title"><h2>Decision board</h2><span id="data-label">DEMO DATA</span></div>
+      <div id="score-cards" class="score-grid"></div>
+
+      <div class="two-col">
+        <article class="card">
+          <div class="card-head"><h3>Target allocation</h3><span>400M sleeve</span></div>
+          <div id="targets"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><h3>Current holdings</h3><span>transactions DB</span></div>
+          <div id="holdings" class="empty">Chưa import giao dịch thật.</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="handbook" class="panel">
+      <div class="handbook-layout">
+        <aside><input id="guide-search" placeholder="Tìm trong 38 mục…" /><div id="guide-nav"></div></aside>
+        <article id="guide-content" class="guide-content"></article>
+      </div>
+    </section>
+
+    <section id="scorelab" class="panel">
+      <div class="two-col score-lab">
+        <article class="card">
+          <div class="card-head"><h3>Score Lab</h3><span>deterministic</span></div>
+          <label>Ticker <input id="ticker" value="TEST" /></label>
+          <div id="metric-inputs" class="metric-inputs"></div>
+          <label>Data completeness <input id="completeness" type="range" min="0.3" max="1" step="0.01" value="0.90" /><output id="completeness-out">90%</output></label>
+          <label>Freshness (hours) <input id="freshness" type="number" min="0" value="3" /></label>
+          <button id="run-score" class="primary">Run Decision Index</button>
+        </article>
+        <article class="card result-card">
+          <div class="card-head"><h3>Result</h3><span>manual approval required</span></div>
+          <div class="dial"><div id="lab-score">—</div><small>Decision Index</small></div>
+          <div class="result-line"><span>Confidence</span><b id="lab-confidence">—</b></div>
+          <div class="result-line"><span>Action band</span><b id="lab-action">—</b></div>
+          <div class="result-line"><span>Suggested tranche</span><b id="lab-sizing">—</b></div>
+          <p id="lab-rationale" class="muted">Nhập KPI rồi chạy score.</p>
+        </article>
+      </div>
+      <article class="card formula-card">
+        <h3>Weighted engine</h3>
+        <code>Index = 18% Quality + 14% Growth + 17% Valuation + 8% Momentum + 14% Financial Strength + 12% Risk + 7% Liquidity + 10% Macro</code>
+        <p>Confidence không cộng vào điểm. Nó dùng để gate action và giảm sizing khi dữ liệu thiếu/cũ hoặc các component mâu thuẫn mạnh.</p>
+      </article>
+    </section>
+
+    <section id="architecture" class="panel">
+      <div class="architecture-card">
+        <div class="node you">YOU<br><small>approve only</small></div>
+        <div class="arrow">↓</div>
+        <div class="node hermes">HERMES<br><small>supervisor</small></div>
+        <div class="branches">
+          <div><div class="arrow">↙</div><div class="node">Market / Research</div></div>
+          <div><div class="arrow">↓</div><div class="node">Portfolio DB</div></div>
+          <div><div class="arrow">↘</div><div class="node">Documents</div></div>
+        </div>
+        <div class="branches">
+          <div class="node codex">CODEX<br><small>builder / executor</small></div>
+          <div class="node db">SQLite WAL<br><small>ledger + audit</small></div>
+          <div class="node claude">CLAUDE<br><small>reviewer</small></div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="node output">DAILY / WEEKLY REVIEW<br><small>score + confidence + thesis delta + policy breach</small></div>
+      </div>
+      <div class="three-col">
+        <article class="card"><h3>Hermes</h3><p>Supervisor nhận snapshot, phân nhiệm, tổng hợp output và tạo review package. Không có quyền broker write.</p></article>
+        <article class="card"><h3>Codex</h3><p>Builder/executor cho database, import, KPI calculation, XIRR, policy checks, tests và data adapters.</p></article>
+        <article class="card"><h3>Claude</h3><p>Second opinion cho annual report, BCTC, thesis/risk review. Kết luận được lưu cạnh deterministic score, không thay thế score.</p></article>
+      </div>
+      <article class="card"><h3>External bridge</h3><p><code>HERMES_WEBHOOK_URL</code>, <code>CODEX_REVIEW_COMMAND</code>, <code>CLAUDE_REVIEW_COMMAND</code> là optional. Khi chưa cấu hình, app vẫn chạy đầy đủ bằng deterministic engine.</p></article>
+    </section>
+
+    <section id="audit" class="panel">
+      <article class="card"><div class="card-head"><h3>Audit trail</h3><button id="refresh-audit">Refresh</button></div><div id="audit-table"></div></article>
+    </section>
+  </main>
+
+  <footer>Decision-support cockpit. Không tự động giao dịch. Demo KPI phải được thay bằng nguồn dữ liệu được xác minh trước khi dùng cho tiền thật.</footer>
+  <script src="/app.js"></script>
+</body>
+</html>

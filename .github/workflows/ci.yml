@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t alpha-cockpit:test .
+
+      - name: Run unit tests in image
+        run: docker run --rm alpha-cockpit:test python -m unittest discover -s tests -v
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name alpha-cockpit-test -p 18080:8080 alpha-cockpit:test
+          trap 'docker logs alpha-cockpit-test || true; docker rm -f alpha-cockpit-test || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18080/api/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
