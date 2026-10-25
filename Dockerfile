@@ -1,0 +1,6 @@
+FROM python:3.15.1-slim
+WORKDIR /app
+COPY . .
+ENV PYTHONUNBUFFERED=1 HOST=0.0.0.0 PORT=8080
+EXPOSE 8080
+CMD ["python", "app.py"]
