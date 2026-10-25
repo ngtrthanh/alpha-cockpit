@@ -572,7 +572,7 @@ class Handler(SimpleHTTPRequestHandler):
 def main() -> None:
     init_db()
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8080"))
+    port = int(os.getenv("PORT", "6868"))
     print(f"Alpha Cockpit listening on http://{host}:{port}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
