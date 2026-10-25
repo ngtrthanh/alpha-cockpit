@@ -18,13 +18,15 @@ A Vietnamese practical stock-investing handbook plus an explainable decision-sup
 python app.py
 ```
 
-Open `http://localhost:8080`.
+Open `http://localhost:6868`.
 
 ## Run with Docker
 
 ```bash
 docker compose up --build
 ```
+
+Open `http://localhost:6868`.
 
 The Docker image uses Python 3.15.1. The application itself intentionally uses only Python standard-library modules, including `sqlite3`, to keep deployment lean.
 

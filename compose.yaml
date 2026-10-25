@@ -2,11 +2,11 @@ services:
   alpha-cockpit:
     build: .
     ports:
-      - "8080:8080"
+      - "6868:6868"
     volumes:
       - ./data:/app/data
     environment:
       HOST: 0.0.0.0
-      PORT: 8080
+      PORT: 6868
       INVEST_DB: /app/data/investment.db
     restart: unless-stopped

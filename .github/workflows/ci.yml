@@ -20,10 +20,10 @@ jobs:
 
       - name: Smoke test container
         run: |
-          docker run -d --name alpha-cockpit-test -p 18080:8080 alpha-cockpit:test
+          docker run -d --name alpha-cockpit-test -p 16868:6868 alpha-cockpit:test
           trap 'docker logs alpha-cockpit-test || true; docker rm -f alpha-cockpit-test || true' EXIT
           for i in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:18080/api/health; then
+            if curl -fsS http://127.0.0.1:16868/api/health; then
               exit 0
             fi
             sleep 1
