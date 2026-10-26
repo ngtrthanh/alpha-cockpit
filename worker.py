@@ -8,6 +8,7 @@ import time
 import app
 from agent_runtime import HermesClient
 from paper_broker import PaperOrder, process_open_orders, submit
+from fundamental_research import needs_refresh, research_ticker
 from runtime_db import connect, init_runtime_schema, latest_market, now_iso, set_service_status, watchlist
 from ssi_market import run_stream_forever
 
@@ -55,6 +56,16 @@ def create_signals() -> int:
     return made
 
 
+def refresh_fundamentals(client: HermesClient) -> None:
+    for ticker in watchlist():
+        if not needs_refresh(ticker):
+            continue
+        try:
+            research_ticker(client, ticker)
+        except Exception as e:
+            set_service_status("fundamental_research", "error", error=f"{ticker}: {e}")
+
+
 def committee_cycle(client: HermesClient) -> None:
     try:
         client.health()
@@ -99,6 +110,7 @@ def main() -> None:
                 process_open_orders()
             now = time.time()
             if now - last_agents >= AGENT_INTERVAL_SECONDS:
+                refresh_fundamentals(client)
                 create_signals()
                 committee_cycle(client)
                 last_agents = now
