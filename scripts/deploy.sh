@@ -7,13 +7,14 @@ DEPLOY_DIR="${DEPLOY_DIR:-$HOME/alpha-cockpit-prod}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:6868/api/health}"
 RUNTIME_URL="${RUNTIME_URL:-http://127.0.0.1:6868/api/runtime}"
 LOCK_FILE="${LOCK_FILE:-$HOME/.alpha-cockpit-deploy.lock}"
+IMAGE_REPO="${IMAGE_REPO:-ghcr.io/ngtrthanh/alpha-cockpit}"
 
 if [[ -z "$TARGET_SHA" ]]; then
   echo "usage: deploy.sh <git-sha>" >&2
   exit 64
 fi
 
-for cmd in git docker curl flock; do
+for cmd in git docker curl flock python3; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "missing required command: $cmd" >&2; exit 69; }
 done
 
@@ -47,17 +48,40 @@ if ! git branch -r --contains "$TARGET_SHA" | grep -qE 'origin/main$'; then
 fi
 
 PREVIOUS_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
-if [[ "$PREVIOUS_SHA" == "$TARGET_SHA" ]]; then
-  echo "already deployed: $TARGET_SHA"
+TARGET_IMAGE="$IMAGE_REPO:sha-$TARGET_SHA"
+
+json_field() {
+  local field="$1"
+  python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$field"
+}
+
+current_health_sha() {
+  curl -fsS "$HEALTH_URL" 2>/dev/null | json_field commit 2>/dev/null || true
+}
+
+worker_status() {
+  curl -fsS "$RUNTIME_URL" 2>/dev/null | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+for row in data.get("services", []):
+    if row.get("service") == "worker":
+        print(row.get("status", ""))
+        break
+' 2>/dev/null || true
+}
+
+CURRENT_HEALTH_SHA="$(current_health_sha)"
+if [[ "$PREVIOUS_SHA" == "$TARGET_SHA" && "$CURRENT_HEALTH_SHA" == "$TARGET_SHA" && "$(worker_status)" == "ok" ]]; then
+  echo "already deployed and healthy: $TARGET_SHA"
   exit 0
 fi
 
-# Prevent delayed workflow_run events from downgrading a newer successful deployment.
-if [[ -n "$PREVIOUS_SHA" ]] && git cat-file -e "${PREVIOUS_SHA}^{commit}" 2>/dev/null; then
-  if git merge-base --is-ancestor "$TARGET_SHA" "$PREVIOUS_SHA" 2>/dev/null; then
-    echo "skipping stale deployment $TARGET_SHA; current deployment is newer: $PREVIOUS_SHA"
-    exit 0
-  fi
+# Prevent delayed workflow_run events from downgrading a newer healthy deployment.
+if [[ -n "$PREVIOUS_SHA" && "$CURRENT_HEALTH_SHA" == "$PREVIOUS_SHA" ]] &&
+   git cat-file -e "${PREVIOUS_SHA}^{commit}" 2>/dev/null &&
+   git merge-base --is-ancestor "$TARGET_SHA" "$PREVIOUS_SHA" 2>/dev/null; then
+  echo "skipping stale deployment $TARGET_SHA; healthy deployment is newer: $PREVIOUS_SHA"
+  exit 0
 fi
 
 if [[ ! -f .env ]]; then
@@ -66,17 +90,18 @@ if [[ ! -f .env ]]; then
 fi
 
 backup_db() {
-  local stamp backup_rel backup_abs
+  local stamp backup_rel backup_abs backup_name
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p data/backups
   backup_rel="data/backups/investment-${stamp}-${PREVIOUS_SHA:0:12}.db"
   backup_abs="$DEPLOY_DIR/$backup_rel"
+  backup_name="$(basename "$backup_rel")"
 
   if docker compose ps --status running --services 2>/dev/null | grep -qx alpha-cockpit; then
-    echo "creating SQLite online backup: $backup_rel"
-    docker compose exec -T alpha-cockpit python -c       "import sqlite3; s=sqlite3.connect('/app/data/investment.db'); d=sqlite3.connect('/app/data/backups/$(basename "$backup_rel")'); s.backup(d); d.close(); s.close()"
+    echo "creating SQLite online backup: $backup_rel" >&2
+    docker compose exec -T alpha-cockpit python -c       "import sqlite3; s=sqlite3.connect('/app/data/investment.db'); d=sqlite3.connect('/app/data/backups/$backup_name'); s.backup(d); d.close(); s.close()"
   elif [[ -f data/investment.db ]]; then
-    echo "app is stopped; copying SQLite database: $backup_rel"
+    echo "app is stopped; copying SQLite database: $backup_rel" >&2
     cp -a data/investment.db "$backup_abs"
   else
     backup_abs=""
@@ -86,14 +111,12 @@ backup_db() {
 
 wait_for_health() {
   local expected_sha="$1"
-  local i health runtime
+  local i health_sha worker
   for i in $(seq 1 60); do
-    health="$(curl -fsS "$HEALTH_URL" 2>/dev/null || true)"
-    if [[ -n "$health" ]] && grep -Fq "\"commit\": \"$expected_sha\"" <<<"$health"; then
-      runtime="$(curl -fsS "$RUNTIME_URL" 2>/dev/null || true)"
-      if grep -Fq '"service": "worker"' <<<"$runtime" && grep -Fq '"status": "ok"' <<<"$runtime"; then
-        return 0
-      fi
+    health_sha="$(current_health_sha)"
+    worker="$(worker_status)"
+    if [[ "$health_sha" == "$expected_sha" && "$worker" == "ok" ]]; then
+      return 0
     fi
     sleep 2
   done
@@ -102,24 +125,29 @@ wait_for_health() {
 
 restore_db() {
   local backup="$1"
+  local image="$2"
   [[ -n "$backup" && -f "$backup" ]] || return 0
-  echo "restoring SQLite backup: $backup"
+  local backup_name
+  backup_name="$(basename "$backup")"
+  echo "restoring SQLite backup: $backup_name" >&2
   docker compose stop worker alpha-cockpit >/dev/null 2>&1 || true
-  cp -a "$backup" data/investment.db
-  rm -f data/investment.db-wal data/investment.db-shm
+  docker run --rm     -v "$DEPLOY_DIR/data:/app/data"     "$image"     python -c "import os,shutil; shutil.copy2('/app/data/backups/$backup_name','/app/data/investment.db'); [os.remove(p) for p in ('/app/data/investment.db-wal','/app/data/investment.db-shm') if os.path.exists(p)]"
 }
 
 BACKUP_PATH="$(backup_db)"
 
-echo "deploying $TARGET_SHA (previous: ${PREVIOUS_SHA:-none})"
+echo "deploying $TARGET_SHA using $TARGET_IMAGE (previous: ${PREVIOUS_SHA:-none})"
 git reset --hard "$TARGET_SHA"
 
-# Validate with the production .env before touching running services.
-docker compose config >/dev/null
-
 export APP_COMMIT_SHA="$TARGET_SHA"
-docker compose build --pull alpha-cockpit worker
-docker compose up -d --remove-orphans
+export ALPHA_IMAGE="$TARGET_IMAGE"
+
+# Validate production config and pull the exact CI-published multi-arch artifact
+# before touching running services.
+docker compose config >/dev/null
+docker pull "$TARGET_IMAGE"
+
+docker compose up -d --no-build --remove-orphans
 
 if wait_for_health "$TARGET_SHA"; then
   echo "deployment healthy: $TARGET_SHA"
@@ -136,13 +164,15 @@ if [[ -z "$PREVIOUS_SHA" ]] || ! git cat-file -e "${PREVIOUS_SHA}^{commit}" 2>/d
   exit 1
 fi
 
-echo "rolling back to $PREVIOUS_SHA" >&2
-restore_db "$BACKUP_PATH"
+ROLLBACK_IMAGE="$IMAGE_REPO:sha-$PREVIOUS_SHA"
+echo "rolling back to $PREVIOUS_SHA using $ROLLBACK_IMAGE" >&2
+docker pull "$ROLLBACK_IMAGE"
+restore_db "$BACKUP_PATH" "$ROLLBACK_IMAGE"
 git reset --hard "$PREVIOUS_SHA"
 export APP_COMMIT_SHA="$PREVIOUS_SHA"
+export ALPHA_IMAGE="$ROLLBACK_IMAGE"
 docker compose config >/dev/null
-docker compose build alpha-cockpit worker
-docker compose up -d --remove-orphans
+docker compose up -d --no-build --remove-orphans
 
 if wait_for_health "$PREVIOUS_SHA"; then
   echo "rollback healthy: $PREVIOUS_SHA" >&2
