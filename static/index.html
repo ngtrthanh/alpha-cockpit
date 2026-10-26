@@ -20,6 +20,7 @@
     <button class="tab" data-tab="handbook">38 mục thực chiến</button>
     <button class="tab" data-tab="scorelab">Decision Index</button>
     <button class="tab" data-tab="architecture">Agent architecture</button>
+    <button class="tab" data-tab="runtime">Runtime</button>
     <button class="tab" data-tab="audit">Audit</button>
   </nav>
 
@@ -45,7 +46,7 @@
         </article>
       </div>
 
-      <div class="section-title"><h2>Decision board</h2><span id="data-label">DEMO DATA</span></div>
+      <div class="section-title"><h2>Decision board</h2><span id="data-label">LIVE DATA ONLY</span></div>
       <div id="score-cards" class="score-grid"></div>
 
       <div class="two-col">
@@ -116,7 +117,17 @@
         <article class="card"><h3>Codex</h3><p>Builder/executor cho database, import, KPI calculation, XIRR, policy checks, tests và data adapters.</p></article>
         <article class="card"><h3>Claude</h3><p>Second opinion cho annual report, BCTC, thesis/risk review. Kết luận được lưu cạnh deterministic score, không thay thế score.</p></article>
       </div>
-      <article class="card"><h3>External bridge</h3><p><code>HERMES_WEBHOOK_URL</code>, <code>CODEX_REVIEW_COMMAND</code>, <code>CLAUDE_REVIEW_COMMAND</code> là optional. Khi chưa cấu hình, app vẫn chạy đầy đủ bằng deterministic engine.</p></article>
+      <article class="card"><h3>Real runtime</h3><p>Hermes runs as an official sidecar on port 8642 inside Docker. Alpha Cockpit calls Hermes through its authenticated OpenAI-compatible API. Codex and Claude are explicit provider routes through Hermes. Missing credentials are reported as runtime errors; they are not replaced by fake output.</p></article>
+    </section>
+
+    <section id="runtime" class="panel">
+      <div class="section-title"><h2>Live runtime</h2><span>NO SYNTHETIC FALLBACK</span></div>
+      <div id="runtime-services" class="three-col"></div>
+      <div class="two-col">
+        <article class="card"><div class="card-head"><h3>Paper accounts</h3><span>A / B tracks</span></div><div id="paper-accounts"></div></article>
+        <article class="card"><div class="card-head"><h3>Paper positions</h3><span>real market fills only</span></div><div id="paper-positions"></div></article>
+      </div>
+      <article class="card" style="margin-top:14px"><div class="card-head"><h3>Recent agent runs</h3><span>Hermes / Codex / Claude</span></div><div id="agent-reports"></div></article>
     </section>
 
     <section id="audit" class="panel">
@@ -124,7 +135,7 @@
     </section>
   </main>
 
-  <footer>Decision-support cockpit. Không tự động giao dịch. Demo KPI phải được thay bằng nguồn dữ liệu được xác minh trước khi dùng cho tiền thật.</footer>
+  <footer>Decision-support cockpit. No brokerage write API. Live mode refuses synthetic market/fundamental fallbacks unless ALLOW_DEMO_DATA=true is explicitly set.</footer>
   <script src="/app.js"></script>
 </body>
 </html>
