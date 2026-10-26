@@ -153,11 +153,11 @@ SQLite runs in WAL mode and is shared only across the local Docker services on t
 
 ## Live data policy
 
-`ALLOW_DEMO_DATA=false` is the default and is set again in Compose.
+There is no synthetic-data runtime mode.
 
-With live mode:
+In live mode:
 
-- no hard-coded FPT/HPG/MBB/ETF prices are seeded;
+- no hard-coded FPT/HPG/MBB/ETF prices exist in the runtime;
 - no synthetic fundamentals are used;
 - scores appear only after live research has been stored;
 - paper orders require actual records from the market-event table;
