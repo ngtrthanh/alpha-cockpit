@@ -19,7 +19,8 @@ function scoreCard(d){
 async function loadCockpit(){
   const [p,s,h]=await Promise.all([api('/api/portfolio'),api('/api/scores'),api('/api/health')]);
   $('#health').textContent=h.ok?'engine online':'offline'; $('#hurdle').textContent=p.deposit_rate.toFixed(1)+'%';
-  $('#score-cards').innerHTML=s.map(scoreCard).join('');
+  $('#data-label').textContent=h.demo_data?'DEMO ENABLED':'LIVE DATA ONLY';
+  $('#score-cards').innerHTML=s.length?s.map(scoreCard).join(''):'<article class="card"><b>No scored live data yet.</b><p class="muted">Check Runtime for Hermes/SSI status. No synthetic fallback is being used.</p></article>';
   $('#targets').innerHTML=p.targets.map(t=>`<div class="alloc-row"><b>${t.ticker}</b><div class="alloc-track"><i style="width:${t.target_weight*100}%"></i></div><span>${(t.target_weight*100).toFixed(1)}%</span></div>`).join('');
   $('#holdings').innerHTML=p.holdings.length?p.holdings.map(h=>`<div class="metric-row"><b>${h.ticker} · ${h.qty}</b><span>${money(h.value)}</span></div>`).join(''):'Chưa import giao dịch thật.';
 }
@@ -51,5 +52,14 @@ function initScoreLab(){
 
 async function loadAudit(){const rows=await api('/api/audit');$('#audit-table').innerHTML=rows.map(r=>`<div class="audit-row"><time>${r.ts.replace('T',' ')}</time><b>${r.event_type}</b><span>${r.detail}</span></div>`).join('')}
 
-async function boot(){initTabs();initScoreLab();await Promise.all([loadCockpit(),loadHandbook(),loadAudit()]);$('#refresh-audit').onclick=loadAudit;}
+async function loadRuntime(){
+  const [rt,paper]=await Promise.all([api('/api/runtime'),api('/api/paper')]);
+  const services=rt.services||[];
+  $('#runtime-services').innerHTML=services.length?services.map(s=>`<article class="card"><div class="card-head"><b>${s.service}</b><span>${s.status}</span></div><p class="muted">last ok: ${s.last_ok||'—'}<br>error: ${s.last_error||'—'}</p></article>`).join(''):'<article class="card"><b>No service heartbeat yet.</b></article>';
+  $('#paper-accounts').innerHTML=(paper.accounts||[]).map(a=>`<div class="metric-row"><b>${a.track}</b><span>${money(a.cash)}</span></div>`).join('')||'—';
+  $('#paper-positions').innerHTML=(paper.positions||[]).map(p=>`<div class="metric-row"><b>${p.track} · ${p.ticker} · ${p.qty}</b><span>${money(p.avg_cost)}</span></div>`).join('')||'No positions yet.';
+  $('#agent-reports').innerHTML=(rt.agent_reports||[]).map(r=>`<div class="audit-row"><time>${r.ts.replace('T',' ')}</time><b>${r.role}</b><span>${r.provider} · ${r.model||'default'} · ${r.status}</span></div>`).join('')||'No agent runs yet.';
+}
+
+async function boot(){initTabs();initScoreLab();await Promise.all([loadCockpit(),loadHandbook(),loadAudit(),loadRuntime()]);$('#refresh-audit').onclick=loadAudit;}
 boot().catch(e=>{console.error(e);$('#health').textContent='error';});
