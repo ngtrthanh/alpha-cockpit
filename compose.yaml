@@ -21,12 +21,14 @@ services:
       retries: 5
 
   alpha-cockpit:
+    image: "${ALPHA_IMAGE:-alpha-cockpit:local}"
     build: .
     ports:
       - "6868:6868"
     environment:
       HOST: "0.0.0.0"
       PORT: "6868"
+      APP_COMMIT_SHA: "${APP_COMMIT_SHA:-unknown}"
       INVEST_DB: "/app/data/investment.db"
       HERMES_URL: "http://hermes:8642"
       HERMES_API_KEY: "${HERMES_API_KEY:?set HERMES_API_KEY}"
@@ -42,9 +44,11 @@ services:
     restart: unless-stopped
 
   worker:
+    image: "${ALPHA_IMAGE:-alpha-cockpit:local}"
     build: .
     command: ["python", "worker.py"]
     environment:
+      APP_COMMIT_SHA: "${APP_COMMIT_SHA:-unknown}"
       INVEST_DB: "/app/data/investment.db"
       HERMES_URL: "http://hermes:8642"
       HERMES_API_KEY: "${HERMES_API_KEY:?set HERMES_API_KEY}"
