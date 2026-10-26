@@ -37,13 +37,19 @@ def _position(conn, track: str, ticker: str):
 
 
 def _apply_fill(conn, order, qty: int, price: float, fee_rate: float = 0.0015, sell_tax_rate: float = 0.001):
-    gross = qty * price
-    fee = gross * fee_rate
-    tax = gross * sell_tax_rate if order["side"] == "SELL" else 0.0
     account = conn.execute("SELECT * FROM paper_accounts WHERE track=?", (order["track"],)).fetchone()
     if not account:
         raise RuntimeError("paper account missing")
     pos = _position(conn, order["track"], order["ticker"])
+
+    if order["side"] == "SELL":
+        qty = min(qty, int(pos["qty"]))
+        if qty <= 0:
+            return 0
+
+    gross = qty * price
+    fee = gross * fee_rate
+    tax = gross * sell_tax_rate if order["side"] == "SELL" else 0.0
 
     if order["side"] == "BUY":
         required = gross + fee
@@ -54,9 +60,6 @@ def _apply_fill(conn, order, qty: int, price: float, fee_rate: float = 0.0015, s
         avg = new_cost / new_qty
         cash = account["cash"] - required
     else:
-        qty = min(qty, int(pos["qty"]))
-        if qty <= 0:
-            return 0
         cash = account["cash"] + gross - fee - tax
         new_qty = pos["qty"] - qty
         avg = pos["avg_cost"] if new_qty else 0.0
