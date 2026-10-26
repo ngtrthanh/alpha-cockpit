@@ -48,6 +48,11 @@ if ! git branch -r --contains "$TARGET_SHA" | grep -qE 'origin/main$'; then
 fi
 
 PREVIOUS_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+PREVIOUS_CONTAINER_ID="$(docker compose ps -q alpha-cockpit 2>/dev/null || true)"
+PREVIOUS_IMAGE=""
+if [[ -n "$PREVIOUS_CONTAINER_ID" ]]; then
+  PREVIOUS_IMAGE="$(docker inspect "$PREVIOUS_CONTAINER_ID" --format '{{.Config.Image}}' 2>/dev/null || true)"
+fi
 TARGET_IMAGE="$IMAGE_REPO:sha-$TARGET_SHA"
 
 json_field() {
@@ -111,12 +116,24 @@ backup_db() {
 
 wait_for_health() {
   local expected_sha="$1"
-  local i health_sha worker
+  local allow_legacy="${2:-false}"
+  local i health health_sha health_ok worker
   for i in $(seq 1 60); do
-    health_sha="$(current_health_sha)"
+    health="$(curl -fsS "$HEALTH_URL" 2>/dev/null || true)"
+    health_sha=""
+    health_ok=""
+    if [[ -n "$health" ]]; then
+      health_sha="$(printf '%s' "$health" | json_field commit 2>/dev/null || true)"
+      health_ok="$(printf '%s' "$health" | json_field ok 2>/dev/null || true)"
+    fi
     worker="$(worker_status)"
-    if [[ "$health_sha" == "$expected_sha" && "$worker" == "ok" ]]; then
-      return 0
+    if [[ "$worker" == "ok" ]]; then
+      if [[ "$health_sha" == "$expected_sha" ]]; then
+        return 0
+      fi
+      if [[ "$allow_legacy" == "true" && "$health_ok" == "True" && ( -z "$health_sha" || "$health_sha" == "unknown" ) ]]; then
+        return 0
+      fi
     fi
     sleep 2
   done
@@ -164,17 +181,23 @@ if [[ -z "$PREVIOUS_SHA" ]] || ! git cat-file -e "${PREVIOUS_SHA}^{commit}" 2>/d
   exit 1
 fi
 
-ROLLBACK_IMAGE="$IMAGE_REPO:sha-$PREVIOUS_SHA"
-echo "rolling back to $PREVIOUS_SHA using $ROLLBACK_IMAGE" >&2
-docker pull "$ROLLBACK_IMAGE"
-restore_db "$BACKUP_PATH" "$ROLLBACK_IMAGE"
+echo "rolling back to $PREVIOUS_SHA using previous image ${PREVIOUS_IMAGE:-<rebuild>}" >&2
+restore_db "$BACKUP_PATH" "$TARGET_IMAGE"
 git reset --hard "$PREVIOUS_SHA"
 export APP_COMMIT_SHA="$PREVIOUS_SHA"
-export ALPHA_IMAGE="$ROLLBACK_IMAGE"
-docker compose config >/dev/null
-docker compose up -d --no-build --remove-orphans
 
-if wait_for_health "$PREVIOUS_SHA"; then
+if [[ -n "$PREVIOUS_IMAGE" ]]; then
+  export ALPHA_IMAGE="$PREVIOUS_IMAGE"
+  docker compose config >/dev/null
+  docker compose up -d --no-build --remove-orphans
+else
+  unset ALPHA_IMAGE
+  docker compose config >/dev/null
+  docker compose build alpha-cockpit worker
+  docker compose up -d --remove-orphans
+fi
+
+if wait_for_health "$PREVIOUS_SHA" true; then
   echo "rollback healthy: $PREVIOUS_SHA" >&2
   exit 1
 fi
