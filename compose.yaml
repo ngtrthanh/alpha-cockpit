@@ -34,7 +34,6 @@ services:
       CODEX_MODEL: "${CODEX_MODEL:-}"
       CLAUDE_PROVIDER: "${CLAUDE_PROVIDER:-anthropic}"
       CLAUDE_MODEL: "${CLAUDE_MODEL:-}"
-      ALLOW_DEMO_DATA: "false"
     volumes:
       - ./data:/app/data
     depends_on:
@@ -59,7 +58,6 @@ services:
       PAPER_ENABLED: "${PAPER_ENABLED:-true}"
       AGENT_INTERVAL_SECONDS: "${AGENT_INTERVAL_SECONDS:-21600}"
       PAPER_INTERVAL_SECONDS: "${PAPER_INTERVAL_SECONDS:-5}"
-      ALLOW_DEMO_DATA: "false"
     volumes:
       - ./data:/app/data
     depends_on:
