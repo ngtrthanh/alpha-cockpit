@@ -9,21 +9,28 @@ on:
 jobs:
   docker-test:
     runs-on: ubuntu-latest
+    env:
+      HERMES_API_KEY: ci-hermes-key-123456
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image
+      - name: Validate compose
+        run: docker compose config >/dev/null
+
+      - name: Build app image
         run: docker build -t alpha-cockpit:test .
 
       - name: Run unit tests in image
         run: docker run --rm alpha-cockpit:test python -m unittest discover -s tests -v
 
-      - name: Smoke test container
+      - name: Smoke test app container
         run: |
           docker run -d --name alpha-cockpit-test -p 16868:6868 alpha-cockpit:test
           trap 'docker logs alpha-cockpit-test || true; docker rm -f alpha-cockpit-test || true' EXIT
-          for i in $(seq 1 20); do
+          for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:16868/api/health; then
+              curl -fsS http://127.0.0.1:16868/api/runtime
+              curl -fsS http://127.0.0.1:16868/api/paper
               exit 0
             fi
             sleep 1

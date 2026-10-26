@@ -10,11 +10,15 @@ TMP = tempfile.TemporaryDirectory()
 os.environ["INVEST_DB"] = str(Path(TMP.name) / "test.db")
 
 import app
+from paper_broker import PaperOrder, process_open_orders, submit
+from runtime_db import connect, init_runtime_schema, record_market_event
+
 
 class EngineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         app.init_db()
+        init_runtime_schema()
 
     def test_score_is_deterministic(self):
         metrics = {k: 70 for k in app.WEIGHTS}
@@ -32,11 +36,30 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(d.allocation_bias, "DATA_GAP")
         self.assertEqual(d.suggested_value, 0)
 
+    def test_no_demo_data_seeded_by_default(self):
+        with connect() as conn:
+            n = conn.execute("SELECT COUNT(*) AS n FROM fundamentals WHERE source='demo'").fetchone()["n"]
+        self.assertEqual(n, 0)
+
+    def test_track_a_rejects_sell(self):
+        with self.assertRaises(ValueError):
+            submit(PaperOrder("A_BUY_ONLY", "TST", "SELL", 100, 10_000))
+
+    def test_paper_buy_fills_from_real_market_event_table(self):
+        record_market_event("TST", 10_000, volume=10_000, source="test-live-feed", kind="trade")
+        order_id = submit(PaperOrder("A_BUY_ONLY", "TST", "BUY", 100, 10_000))
+        process_open_orders()
+        with connect() as conn:
+            order = conn.execute("SELECT status FROM paper_orders WHERE id=?", (order_id,)).fetchone()
+            pos = conn.execute("SELECT qty FROM paper_positions WHERE track='A_BUY_ONLY' AND ticker='TST'").fetchone()
+        self.assertEqual(order["status"], "FILLED")
+        self.assertEqual(pos["qty"], 100)
+
     def test_no_broker_write_route(self):
-        # Architectural assertion: server exposes transaction import and analysis, not broker order submission.
         source = Path(app.__file__).read_text(encoding="utf-8")
         self.assertNotIn("/api/broker/order", source)
         self.assertNotIn("PLACE_ORDER", source)
+
 
 if __name__ == "__main__":
     unittest.main()
