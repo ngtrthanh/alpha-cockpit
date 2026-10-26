@@ -13,12 +13,17 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from agent_runtime import HermesClient
+from paper_broker import snapshot as paper_snapshot
+from runtime_db import connect as runtime_connect, get_service_status, init_runtime_schema, watchlist
+
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("INVEST_DB", ROOT / "data" / "investment.db"))
 STATIC = ROOT / "static"
 HANDBOOK_PATH = ROOT / "data" / "handbook.json"
 
 DEFAULT_BENCHMARK_RATE = 8.8
+ALLOW_DEMO_DATA = os.getenv("ALLOW_DEMO_DATA", "false").lower() in {"1","true","yes","on"}
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -224,18 +229,19 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO targets(ticker,target_weight,min_weight,max_weight,asset_type) VALUES(?,?,?,?,?)",
             targets,
         )
-        for ticker, item in DEMO_FUNDAMENTALS.items():
-            conn.execute(
-                "INSERT OR IGNORE INTO fundamentals(ticker,sector,payload,updated_at,source) VALUES(?,?,?,?,?)",
-                (ticker, item["sector"], json.dumps(item["metrics"]), now_iso(), "demo"),
-            )
-            conn.execute(
-                "INSERT OR IGNORE INTO market_snapshots(ticker,ts,price,source) VALUES(?,?,?,?)",
-                (ticker, now_iso(), item["price"], "demo"),
-            )
+        if ALLOW_DEMO_DATA:
+            for ticker, item in DEMO_FUNDAMENTALS.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO fundamentals(ticker,sector,payload,updated_at,source) VALUES(?,?,?,?,?)",
+                    (ticker, item["sector"], json.dumps(item["metrics"]), now_iso(), "demo"),
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO market_snapshots(ticker,ts,price,source) VALUES(?,?,?,?)",
+                    (ticker, now_iso(), item["price"], "demo"),
+                )
         conn.execute(
             "INSERT OR IGNORE INTO audit_log(id,ts,event_type,detail) VALUES(1,?,?,?)",
-            (now_iso(), "SYSTEM_INIT", "Database initialized; demo market data loaded; brokerage write access absent."),
+            (now_iso(), "SYSTEM_INIT", f"Database initialized; demo_data={ALLOW_DEMO_DATA}; brokerage write access absent."),
         )
 
 
@@ -392,57 +398,25 @@ def evaluate(ticker: str, metrics: dict[str, Any] | None = None, equity_budget: 
 
 
 def run_agent(role: str, payload: dict[str, Any]) -> dict[str, Any]:
+    client = HermesClient()
     role = role.lower()
-    if role not in {"hermes", "codex", "claude"}:
+    prompt = json.dumps(payload, ensure_ascii=False, default=str)
+    if role == "hermes":
+        result = client.supervisor(prompt)
+    elif role == "codex":
+        result = client.codex(prompt)
+    elif role == "claude":
+        result = client.claude(prompt)
+    else:
         raise ValueError("role must be hermes, codex or claude")
-
-    # Safe-by-default: no broker order endpoint exists. External agents only receive analysis payloads.
-    provider = "local-disabled"
-    status = "disabled"
-    output = "External agent bridge not configured. Deterministic engine remains active."
-
-    if role == "hermes" and os.getenv("HERMES_WEBHOOK_URL"):
-        provider = "hermes-webhook"
-        req = urllib.request.Request(
-            os.environ["HERMES_WEBHOOK_URL"],
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                output = resp.read().decode()[:4000]
-                status = "ok"
-        except Exception as e:
-            status = "error"
-            output = str(e)
-    elif role in {"codex", "claude"}:
-        env_name = "CODEX_REVIEW_COMMAND" if role == "codex" else "CLAUDE_REVIEW_COMMAND"
-        cmd = os.getenv(env_name)
-        if cmd:
-            provider = "local-command"
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    input=json.dumps(payload),
-                    shell=True,
-                    text=True,
-                    capture_output=True,
-                    timeout=30,
-                )
-                status = "ok" if proc.returncode == 0 else "error"
-                output = (proc.stdout or proc.stderr)[:4000]
-            except Exception as e:
-                status = "error"
-                output = str(e)
-
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO agent_runs(ts,role,provider,status,input_summary,output_summary) VALUES(?,?,?,?,?,?)",
-            (now_iso(), role, provider, status, json.dumps(payload)[:2000], output[:2000]),
-        )
-    return {"role": role, "provider": provider, "status": status, "output": output}
-
+    return {
+        "role": result.role,
+        "provider": result.provider,
+        "model": result.model,
+        "status": "ok",
+        "output": result.content,
+        "usage": result.usage,
+    }
 
 def portfolio_payload() -> dict[str, Any]:
     with db() as conn:
@@ -519,14 +493,27 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         try:
             if path == "/api/health":
-                return self.json_response({"ok": True, "db": str(DB_PATH), "broker_write_access": False, "ts": now_iso()})
+                return self.json_response({"ok": True, "mode": "live", "demo_data": ALLOW_DEMO_DATA, "db": str(DB_PATH), "broker_write_access": False, "ts": now_iso()})
             if path == "/api/handbook":
                 return self.json_response(json.loads(HANDBOOK_PATH.read_text(encoding="utf-8")))
             if path == "/api/portfolio":
                 return self.json_response(portfolio_payload())
+            if path == "/api/runtime":
+                with runtime_connect() as rconn:
+                    reports = [dict(r) for r in rconn.execute("SELECT id,ts,role,ticker,provider,model,status FROM agent_reports ORDER BY id DESC LIMIT 30").fetchall()]
+                return self.json_response({"services": get_service_status(), "watchlist": watchlist(), "agent_reports": reports})
+            if path == "/api/paper":
+                return self.json_response(paper_snapshot())
             if path == "/api/scores":
-                tickers = list(DEMO_FUNDAMENTALS)
-                return self.json_response([asdict(evaluate(t)) for t in tickers])
+                with db() as conn:
+                    tickers = [r["ticker"] for r in conn.execute("SELECT ticker FROM fundamentals WHERE source<>'demo' ORDER BY ticker").fetchall()]
+                results = []
+                for ticker in tickers:
+                    try:
+                        results.append(asdict(evaluate(ticker)))
+                    except Exception:
+                        continue
+                return self.json_response(results)
             if path == "/api/audit":
                 with db() as conn:
                     rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 80").fetchall()
@@ -571,6 +558,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     init_db()
+    init_runtime_schema()
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "6868"))
     print(f"Alpha Cockpit listening on http://{host}:{port}")
