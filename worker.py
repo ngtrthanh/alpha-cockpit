@@ -13,7 +13,7 @@ from runtime_db import connect, init_runtime_schema, latest_market, now_iso, set
 from ssi_market import run_stream_forever
 
 PAPER_ENABLED = os.getenv("PAPER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-AGENT_INTERVAL_SECONDS = int(os.getenv("AGENT_INTERVAL_SECONDS", "3600"))
+AGENT_INTERVAL_SECONDS = int(os.getenv("AGENT_INTERVAL_SECONDS", "21600"))
 PAPER_INTERVAL_SECONDS = int(os.getenv("PAPER_INTERVAL_SECONDS", "5"))
 
 
@@ -46,13 +46,35 @@ def create_signals() -> int:
         if direction == "BUY_CANDIDATE":
             limit = float(market.get("ask") or price)
             for track in ("A_BUY_ONLY", "B_FULL_CYCLE"):
-                submit(PaperOrder(track, ticker, "BUY", decision.suggested_qty, limit, signal_id))
+                with connect() as conn:
+                    target = conn.execute("SELECT max_weight FROM targets WHERE ticker=?", (ticker,)).fetchone()
+                    pos = conn.execute("SELECT qty FROM paper_positions WHERE track=? AND ticker=?", (track, ticker)).fetchone()
+                    open_order = conn.execute(
+                        "SELECT 1 FROM paper_orders WHERE track=? AND ticker=? AND side='BUY' AND status IN ('OPEN','PARTIAL') LIMIT 1",
+                        (track, ticker),
+                    ).fetchone()
+                if open_order or not target:
+                    continue
+                current_qty = int(pos["qty"]) if pos else 0
+                max_value = 400_000_000 * float(target["max_weight"])
+                remaining_value = max(0.0, max_value - current_qty * price)
+                max_qty = int(remaining_value // price)
+                max_qty = (max_qty // 100) * 100
+                qty = min(int(decision.suggested_qty), max_qty)
+                if qty >= 100:
+                    submit(PaperOrder(track, ticker, "BUY", qty, limit, signal_id))
         elif direction == "REDUCE_REVIEW":
             with connect() as conn:
                 pos = conn.execute("SELECT qty FROM paper_positions WHERE track='B_FULL_CYCLE' AND ticker=?", (ticker,)).fetchone()
             if pos and pos["qty"] > 0:
-                limit = float(market.get("bid") or price)
-                submit(PaperOrder("B_FULL_CYCLE", ticker, "SELL", int(pos["qty"]), limit, signal_id))
+                with connect() as conn:
+                    open_sell = conn.execute(
+                        "SELECT 1 FROM paper_orders WHERE track='B_FULL_CYCLE' AND ticker=? AND side='SELL' AND status IN ('OPEN','PARTIAL') LIMIT 1",
+                        (ticker,),
+                    ).fetchone()
+                if not open_sell:
+                    limit = float(market.get("bid") or price)
+                    submit(PaperOrder("B_FULL_CYCLE", ticker, "SELL", int(pos["qty"]), limit, signal_id))
     return made
 
 
