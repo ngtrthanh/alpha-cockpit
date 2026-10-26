@@ -23,7 +23,6 @@ STATIC = ROOT / "static"
 HANDBOOK_PATH = ROOT / "data" / "handbook.json"
 
 DEFAULT_BENCHMARK_RATE = 8.8
-ALLOW_DEMO_DATA = os.getenv("ALLOW_DEMO_DATA", "false").lower() in {"1","true","yes","on"}
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -61,7 +60,7 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
   ticker TEXT NOT NULL,
   ts TEXT NOT NULL,
   price REAL NOT NULL,
-  source TEXT NOT NULL DEFAULT 'demo',
+  source TEXT NOT NULL DEFAULT 'unknown',
   UNIQUE(ticker, ts)
 );
 
@@ -70,7 +69,7 @@ CREATE TABLE IF NOT EXISTS fundamentals (
   sector TEXT NOT NULL DEFAULT 'general',
   payload TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  source TEXT NOT NULL DEFAULT 'demo'
+  source TEXT NOT NULL DEFAULT 'unknown'
 );
 
 CREATE TABLE IF NOT EXISTS score_runs (
@@ -111,59 +110,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
   detail TEXT NOT NULL
 );
 """
-
-DEMO_FUNDAMENTALS = {
-    "E1VFVN30": {
-        "sector": "etf",
-        "metrics": {
-            "quality": 72, "growth": 66, "valuation": 63, "momentum": 58,
-            "financial_strength": 82, "risk": 74, "liquidity": 90, "macro": 64,
-            "data_completeness": 0.88, "freshness_hours": 3
-        },
-        "price": 34400,
-        "source": "demo"
-    },
-    "FUEVN100": {
-        "sector": "etf",
-        "metrics": {
-            "quality": 70, "growth": 68, "valuation": 65, "momentum": 56,
-            "financial_strength": 78, "risk": 70, "liquidity": 64, "macro": 64,
-            "data_completeness": 0.84, "freshness_hours": 3
-        },
-        "price": 25200,
-        "source": "demo"
-    },
-    "FPT": {
-        "sector": "technology",
-        "metrics": {
-            "quality": 86, "growth": 82, "valuation": 70, "momentum": 50,
-            "financial_strength": 88, "risk": 69, "liquidity": 88, "macro": 66,
-            "data_completeness": 0.92, "freshness_hours": 3
-        },
-        "price": 57000,
-        "source": "demo"
-    },
-    "HPG": {
-        "sector": "steel",
-        "metrics": {
-            "quality": 72, "growth": 79, "valuation": 80, "momentum": 54,
-            "financial_strength": 68, "risk": 55, "liquidity": 92, "macro": 62,
-            "data_completeness": 0.90, "freshness_hours": 3
-        },
-        "price": 20950,
-        "source": "demo"
-    },
-    "MBB": {
-        "sector": "bank",
-        "metrics": {
-            "quality": 81, "growth": 80, "valuation": 78, "momentum": 61,
-            "financial_strength": 76, "risk": 63, "liquidity": 94, "macro": 68,
-            "data_completeness": 0.91, "freshness_hours": 3
-        },
-        "price": 19800,
-        "source": "demo"
-    }
-}
 
 WEIGHTS = {
     "quality": 0.18,
@@ -229,19 +175,9 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO targets(ticker,target_weight,min_weight,max_weight,asset_type) VALUES(?,?,?,?,?)",
             targets,
         )
-        if ALLOW_DEMO_DATA:
-            for ticker, item in DEMO_FUNDAMENTALS.items():
-                conn.execute(
-                    "INSERT OR IGNORE INTO fundamentals(ticker,sector,payload,updated_at,source) VALUES(?,?,?,?,?)",
-                    (ticker, item["sector"], json.dumps(item["metrics"]), now_iso(), "demo"),
-                )
-                conn.execute(
-                    "INSERT OR IGNORE INTO market_snapshots(ticker,ts,price,source) VALUES(?,?,?,?)",
-                    (ticker, now_iso(), item["price"], "demo"),
-                )
         conn.execute(
             "INSERT OR IGNORE INTO audit_log(id,ts,event_type,detail) VALUES(1,?,?,?)",
-            (now_iso(), "SYSTEM_INIT", f"Database initialized; demo_data={ALLOW_DEMO_DATA}; brokerage write access absent."),
+            (now_iso(), "SYSTEM_INIT", "Database initialized in live-only mode; brokerage write access absent."),
         )
 
 
@@ -336,8 +272,13 @@ def position_summary(conn: sqlite3.Connection) -> dict[str, dict[str, float]]:
 def latest_prices(conn: sqlite3.Connection) -> dict[str, float]:
     rows = conn.execute(
         """SELECT m.ticker,m.price FROM market_snapshots m
-        JOIN (SELECT ticker,MAX(ts) ts FROM market_snapshots GROUP BY ticker) x
-        ON x.ticker=m.ticker AND x.ts=m.ts"""
+        JOIN (
+          SELECT ticker,MAX(ts) ts
+          FROM market_snapshots
+          WHERE source<>'demo'
+          GROUP BY ticker
+        ) x ON x.ticker=m.ticker AND x.ts=m.ts
+        WHERE m.source<>'demo'"""
     ).fetchall()
     return {r["ticker"]: float(r["price"]) for r in rows}
 
@@ -493,7 +434,7 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         try:
             if path == "/api/health":
-                return self.json_response({"ok": True, "mode": "live", "demo_data": ALLOW_DEMO_DATA, "db": str(DB_PATH), "broker_write_access": False, "ts": now_iso()})
+                return self.json_response({"ok": True, "mode": "live", "demo_data": False, "db": str(DB_PATH), "broker_write_access": False, "ts": now_iso()})
             if path == "/api/handbook":
                 return self.json_response(json.loads(HANDBOOK_PATH.read_text(encoding="utf-8")))
             if path == "/api/portfolio":
