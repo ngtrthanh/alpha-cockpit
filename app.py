@@ -23,6 +23,7 @@ STATIC = ROOT / "static"
 HANDBOOK_PATH = ROOT / "data" / "handbook.json"
 
 DEFAULT_BENCHMARK_RATE = 8.8
+APP_COMMIT_SHA = os.getenv("APP_COMMIT_SHA", "unknown")
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -434,7 +435,7 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         try:
             if path == "/api/health":
-                return self.json_response({"ok": True, "mode": "live", "demo_data": False, "db": str(DB_PATH), "broker_write_access": False, "ts": now_iso()})
+                return self.json_response({"ok": True, "mode": "live", "demo_data": False, "commit": APP_COMMIT_SHA, "db": str(DB_PATH), "broker_write_access": False, "ts": now_iso()})
             if path == "/api/handbook":
                 return self.json_response(json.loads(HANDBOOK_PATH.read_text(encoding="utf-8")))
             if path == "/api/portfolio":

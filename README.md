@@ -209,6 +209,14 @@ OPEN -> PARTIAL -> FILLED
 
 A signal is not a fill. Orders are filled only when a recorded market event crosses the limit price. Fill quantity is capped by configurable participation in observed volume. Duplicate open orders are suppressed and position size is capped by portfolio max-weight policy.
 
+## Self-deploy to OCI
+
+Production self-deploy is documented in [docs/SELF_DEPLOY.md](docs/SELF_DEPLOY.md).
+
+The release path is: successful CI on main -> multi-arch GHCR image tagged with the exact commit SHA -> dedicated OCI ARM64 self-hosted runner -> SQLite backup -> exact-image deploy -> app/worker health gate -> automatic rollback on failure.
+
+The normal production deploy path uses --no-build on OCI, so the server runs the image produced for the tested commit rather than rebuilding an untracked variant locally.
+
 ## Development
 
 ```bash
