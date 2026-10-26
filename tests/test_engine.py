@@ -8,7 +8,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 TMP = tempfile.TemporaryDirectory()
 os.environ["INVEST_DB"] = str(Path(TMP.name) / "test.db")
-os.environ["ALLOW_DEMO_DATA"] = "false"
 
 import app
 from paper_broker import PaperOrder, process_open_orders, submit
