@@ -132,6 +132,8 @@ def main() -> None:
             market_thread.start()
             set_service_status("market_data", "starting", detail={"provider": "ssi"})
     else:
+        with connect() as conn:
+            conn.execute("DELETE FROM service_status WHERE service='ssi_market'")
         set_service_status("market_data", "disabled", detail={"provider": MARKET_DATA_PROVIDER})
     client = HermesClient()
     last_agents = 0.0
