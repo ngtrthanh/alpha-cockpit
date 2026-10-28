@@ -1,13 +1,13 @@
 # Alpha Cockpit
 
-A live, human-in-the-loop investment cockpit for Vietnamese equities and ETFs.
+A human-in-the-loop investment cockpit for Vietnamese equities and ETFs. Market data is pluggable and currently disabled by default.
 
 Alpha Cockpit is **not a robo-trader**. It runs real market-data ingestion, a real Hermes supervisor, Codex/Claude review routes, deterministic scoring, and two paper-trading tracks. No brokerage write API is implemented.
 
 ## Runtime
 
 ```text
-SSI FastConnect V3 WebSocket
+market-data adapter (optional)
           |
           v
    market_events / SQLite WAL
@@ -31,7 +31,7 @@ Services in `compose.yaml`:
 
 - `hermes`: official `nousresearch/hermes-agent:stable`, internal API on port 8642.
 - `alpha-cockpit`: web/API on port **6868**.
-- `worker`: SSI realtime collector, research refresh, scoring, agent committee, and paper fills.
+- `worker`: research refresh, scoring, agent committee, optional market-data adapter, and paper fills.
 
 The Hermes API is not exposed to the public host. Alpha Cockpit reaches it through the internal Docker network.
 
@@ -48,15 +48,14 @@ Put the generated value into:
 HERMES_API_KEY=<generated secret>
 ```
 
-Add SSI FastConnect **Market Data** credentials:
+Market data is currently disabled by default:
 
 ```text
-SSI_CLIENT_ID=
-SSI_API_KEY=
-SSI_API_SECRET=
+MARKET_DATA_PROVIDER=none
+PAPER_ENABLED=false
 ```
 
-Alpha Cockpit intentionally does not request an SSI trading OTP or private signing key.
+This lets Hermes/Codex/Claude research and scoring run without SSI. Paper trading remains disabled until a real market-data provider is connected.
 
 Configure the model routes after Hermes setup:
 
@@ -123,7 +122,7 @@ docker compose logs -f worker
 docker compose logs -f alpha-cockpit
 ```
 
-The **Runtime** tab shows real service heartbeats. Missing credentials remain visible as `missing_config` / `error`; the system does not substitute synthetic data.
+The **Runtime** tab shows real service heartbeats. Market data shows `disabled` when no provider is selected; the system does not substitute synthetic quotes.
 
 ## 4. Verify live mode
 
@@ -165,9 +164,13 @@ In live mode:
 
 ## Market data
 
-The worker uses the official SSI Python SDK and subscribes to FastConnect V3 trade + quote streams for the configured watchlist.
+Market data is a pluggable adapter. The default is:
 
-No trading methods are imported or called.
+```text
+MARKET_DATA_PROVIDER=none
+```
+
+No SSI credential is required. Without a market-data provider, research, scoring and committee review still run, but paper orders/fills remain inactive.
 
 ## Fundamental research
 
@@ -183,7 +186,7 @@ The weighted Decision Index itself remains deterministic once the component payl
 
 ## Agent committee
 
-For a ticker with live market and fundamental data:
+For a ticker with fundamental research data:
 
 1. Hermes supervisor frames validation questions.
 2. Codex validates calculations/data transformations/policy logic through an explicit Hermes provider route.
@@ -207,7 +210,7 @@ Paper order state:
 OPEN -> PARTIAL -> FILLED
 ```
 
-A signal is not a fill. Orders are filled only when a recorded market event crosses the limit price. Fill quantity is capped by configurable participation in observed volume. Duplicate open orders are suppressed and position size is capped by portfolio max-weight policy.
+A signal is not a fill. Paper trading is disabled by default. When a real market-data adapter is later enabled, orders are filled only when a recorded market event crosses the limit price. Duplicate open orders are suppressed and position size is capped by portfolio max-weight policy.
 
 ## Self-deploy to OCI
 
