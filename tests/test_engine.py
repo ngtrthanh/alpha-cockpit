@@ -41,6 +41,11 @@ class EngineTests(unittest.TestCase):
             n = conn.execute("SELECT COUNT(*) AS n FROM fundamentals WHERE source='demo'").fetchone()["n"]
         self.assertEqual(n, 0)
 
+    def test_market_data_disabled_by_default(self):
+        import worker
+        self.assertEqual(worker.MARKET_DATA_PROVIDER, "none")
+        self.assertFalse(worker.PAPER_ENABLED)
+
     def test_track_a_rejects_sell(self):
         with self.assertRaises(ValueError):
             submit(PaperOrder("A_BUY_ONLY", "TST", "SELL", 100, 10_000))

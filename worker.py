@@ -10,9 +10,9 @@ from agent_runtime import HermesClient
 from paper_broker import PaperOrder, process_open_orders, submit
 from fundamental_research import needs_refresh, research_ticker
 from runtime_db import connect, init_runtime_schema, latest_market, now_iso, set_service_status, watchlist
-from ssi_market import run_stream_forever
 
-PAPER_ENABLED = os.getenv("PAPER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "none").lower()
+PAPER_ENABLED = os.getenv("PAPER_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 AGENT_INTERVAL_SECONDS = int(os.getenv("AGENT_INTERVAL_SECONDS", "21600"))
 PAPER_INTERVAL_SECONDS = int(os.getenv("PAPER_INTERVAL_SECONDS", "5"))
 
@@ -98,7 +98,7 @@ def committee_cycle(client: HermesClient) -> None:
             f = conn.execute("SELECT * FROM fundamentals WHERE ticker=? AND source<>'demo'", (ticker,)).fetchone()
             m = latest_market(ticker)
             recent = conn.execute("SELECT * FROM score_runs WHERE ticker=? ORDER BY id DESC LIMIT 1", (ticker,)).fetchone()
-        if not f or not m:
+        if not f:
             continue
         context = {
             "ticker": ticker,
@@ -121,11 +121,23 @@ def main() -> None:
     app.init_db()
     init_runtime_schema()
     stop = threading.Event()
-    market_thread = threading.Thread(target=run_stream_forever, args=(stop,), name="ssi-market", daemon=True)
-    market_thread.start()
+    market_thread = None
+    if MARKET_DATA_PROVIDER == "ssi":
+        try:
+            from ssi_market import run_stream_forever
+        except ImportError as e:
+            set_service_status("market_data", "error", error=f"SSI adapter unavailable: {e}")
+        else:
+            market_thread = threading.Thread(target=run_stream_forever, args=(stop,), name="ssi-market", daemon=True)
+            market_thread.start()
+            set_service_status("market_data", "starting", detail={"provider": "ssi"})
+    else:
+        with connect() as conn:
+            conn.execute("DELETE FROM service_status WHERE service='ssi_market'")
+        set_service_status("market_data", "disabled", detail={"provider": MARKET_DATA_PROVIDER})
     client = HermesClient()
     last_agents = 0.0
-    set_service_status("worker", "ok", detail={"paper": PAPER_ENABLED})
+    set_service_status("worker", "ok", detail={"paper": PAPER_ENABLED, "market_data_provider": MARKET_DATA_PROVIDER})
     try:
         while True:
             if PAPER_ENABLED:
